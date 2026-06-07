@@ -645,7 +645,14 @@
     },
     onClick({ n }) {
       const url = n.data?.url;
-      if (url) window.NexusExtensions.navigate(url);
+      if (!url) return;
+      // Internal SPA paths (start with /) — resolve through the Nexus router.
+      // External URLs — open in a new tab.
+      if (url.startsWith("/")) {
+        window.NexusExtensions.navigate(url);
+      } else {
+        window.open(url, "_blank", "noopener,noreferrer");
+      }
     },
   });
 

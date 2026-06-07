@@ -3,7 +3,7 @@
   "manifest_version": 2,
   "name": "Notification Hub",
   "slug": "notification-hub",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Send custom notifications to individual users or broadcast to all members.",
   "author": "ResofireV2",
   "homepage": "https://github.com/ResofireV2/nexus-notification",
