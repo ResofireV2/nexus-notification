@@ -1,0 +1,56 @@
+{
+  "$schema": "https://YOUR-NEXUS-HOST/manifest_schema.json",
+  "manifest_version": 2,
+  "name": "Notification Hub",
+  "slug": "notification-hub",
+  "version": "0.1.0",
+  "description": "Send custom notifications to individual users or broadcast to all members.",
+  "author": "ResofireV2",
+  "homepage": "https://github.com/ResofireV2/nexus-notification",
+  "repository": "https://github.com/ResofireV2/nexus-notification",
+  "license": "MIT",
+  "tags": ["notifications", "moderation"],
+  "module": "NotificationHub",
+  "js_bundle": "notification-hub.js",
+  "permissions": [
+    {
+      "key": "can_send_individual",
+      "label": "Send notifications to individual users",
+      "default": "moderator"
+    },
+    {
+      "key": "can_send_broadcast",
+      "label": "Send notifications to all members or groups",
+      "default": "admin"
+    }
+  ],
+  "notification_types": [
+    {
+      "key": "notification_hub_custom",
+      "label": "Custom notification",
+      "description": "A manually composed notification sent by a moderator or admin.",
+      "icon": "fa-bell",
+      "channels": ["web"],
+      "default_preferences": { "web": true },
+      "payload_schema": {
+        "message": "The notification message body",
+        "url": "The URL the notification navigates to when clicked"
+      }
+    }
+  ],
+  "admin_panel": {
+    "label": "Notification Hub",
+    "icon": "fa-bell"
+  },
+  "hooks": [],
+  "slots": [],
+  "routes": [],
+  "right_widgets": [],
+  "toolbar_buttons": [],
+  "digest_sections": [],
+  "side_data": [],
+  "capabilities": [],
+  "settings_schema": {},
+  "settings_tabs": [],
+  "explore": null
+}
