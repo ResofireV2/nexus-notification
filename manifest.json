@@ -3,7 +3,7 @@
   "manifest_version": 2,
   "name": "Notification Hub",
   "slug": "notification-hub",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Send custom notifications to individual users or broadcast to all members.",
   "author": "ResofireV2",
   "homepage": "https://github.com/ResofireV2/nexus-notification",
@@ -50,7 +50,9 @@
     "icon": "fa-bell"
   },
   "hooks": [],
-  "slots": [],
+  "slots": [
+    "profile_sidebar"
+  ],
   "routes": [],
   "right_widgets": [],
   "toolbar_buttons": [],

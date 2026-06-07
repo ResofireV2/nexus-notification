@@ -720,6 +720,58 @@
   });
 
   // ---------------------------------------------------------------------------
+  // Profile sidebar slot — "Send Notification" button on profile pages
+  // ---------------------------------------------------------------------------
+
+  function ProfileSendButton({ username, current_user }) {
+    const [loading, setLoading] = useState(false);
+
+    // Don't render for guests, own profile, or plain members
+    if (!current_user) return null;
+    if (current_user.username === username) return null;
+    if (current_user.role === "member") return null;
+
+    async function handleClick() {
+      if (loading) return;
+      setLoading(true);
+      try {
+        const d = await window._nexusApi.get(`/users/${encodeURIComponent(username)}`);
+        if (d.user) {
+          showSendModal(d.user);
+        } else {
+          toast("Could not load user", "err");
+        }
+      } catch {
+        toast("Request failed", "err");
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    return R.createElement("div", { style: { marginBottom: 12 } },
+      R.createElement("button", {
+        className: "btn-ghost",
+        style: { fontSize: 13, padding: "6px 14px", display: "flex", alignItems: "center", gap: 7 },
+        onClick: handleClick,
+        disabled: loading,
+      },
+        R.createElement("i", {
+          className: loading ? "fa-solid fa-spinner fa-spin" : "fa-solid fa-bell",
+          style: { fontSize: 12 },
+        }),
+        loading ? "Loading…" : "Send Notification"
+      )
+    );
+  }
+
+  NE.registerSlot({
+    slug:      SLUG,
+    slot:      "profile_sidebar",
+    component: ProfileSendButton,
+    priority:  50,
+  });
+
+  // ---------------------------------------------------------------------------
   // User card action — individual send
   // ---------------------------------------------------------------------------
 
