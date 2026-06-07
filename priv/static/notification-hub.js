@@ -4,7 +4,7 @@
   const NE   = window.NexusExtensions;
   const SLUG = "notification-hub";
   const R    = window.React;
-  const { useState, useEffect, useCallback, useRef } = R;
+  const { useState, useEffect, useCallback } = R;
   const { toast, Av } = window.NexusComponents;
 
   // ---------------------------------------------------------------------------
@@ -51,36 +51,103 @@
   }
 
   // ---------------------------------------------------------------------------
-  // SendModal — compose and send a notification to a single user
-  //
-  // Props:
-  //   targetUser   — full user object (id, username, avatar_url, avatar_color)
-  //   onClose      — called when the modal should be dismissed
+  // Shared: load active notification types
   // ---------------------------------------------------------------------------
 
-  function SendModal({ targetUser, onClose }) {
-    const [types, setTypes]         = useState(null);   // null = loading
-    const [selectedType, setSelectedType] = useState(null);
-    const [message, setMessage]     = useState("");
-    const [url, setUrl]             = useState("");
-    const [sending, setSending]     = useState(false);
+  function useTypes() {
+    const [types, setTypes] = useState(null);
 
-    // Load active notification types from our extension API
     useEffect(() => {
       apiGet("/types").then(d => {
         if (d.types) {
-          const active = d.types.filter(t => t.is_active);
-          setTypes(active);
-          if (active.length > 0) {
-            setSelectedType(active[0]);
-            setMessage(active[0].default_message || "");
-            setUrl(active[0].default_url || "");
-          }
+          setTypes(d.types.filter(t => t.is_active));
         } else {
           setTypes([]);
         }
       }).catch(() => setTypes([]));
     }, []);
+
+    return types;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Shared: type + message + url form fields (used in both modals)
+  // ---------------------------------------------------------------------------
+
+  function NotificationFields({ types, selectedType, onTypeChange, message, onMessage, url, onUrl, disabled }) {
+    if (types === null) {
+      return R.createElement("div", { style: { padding: "16px 0", color: "var(--t5)", fontSize: 13 } },
+        R.createElement("i", { className: "fa-solid fa-spinner fa-spin", style: { marginRight: 8 } }),
+        "Loading types…"
+      );
+    }
+
+    if (types.length === 0) {
+      return R.createElement("div", { style: { padding: "10px 0", color: "var(--red)", fontSize: 13 } },
+        "No active notification types. Create one in the admin panel first."
+      );
+    }
+
+    return R.createElement(R.Fragment, null,
+      // Type
+      R.createElement("div", { className: "fg" },
+        R.createElement("label", { className: "fl" }, "Notification type"),
+        R.createElement(window.NexusComponents.Select, {
+          value: selectedType ? String(selectedType.id) : "",
+          onChange: onTypeChange,
+          options: types.map(t => ({ value: String(t.id), label: t.name })),
+          disabled,
+        })
+      ),
+
+      // Message
+      R.createElement("div", { className: "fg" },
+        R.createElement("label", { className: "fl" }, "Message"),
+        R.createElement("textarea", {
+          className: "fi",
+          value: message,
+          onChange: e => onMessage(e.target.value),
+          placeholder: "Notification message…",
+          rows: 4,
+          style: { resize: "vertical" },
+          disabled,
+        })
+      ),
+
+      // URL
+      R.createElement("div", { className: "fg" },
+        R.createElement("label", { className: "fl" }, "Link"),
+        R.createElement("input", {
+          className: "fi",
+          value: url,
+          onChange: e => onUrl(e.target.value),
+          placeholder: "https:// or /path",
+          disabled,
+        }),
+        R.createElement("div", { className: "f-hint" }, "Where the notification navigates when clicked")
+      )
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // SendModal — individual notification to one user (from user card action)
+  // ---------------------------------------------------------------------------
+
+  function SendModal({ targetUser, onClose }) {
+    const types                         = useTypes();
+    const [selectedType, setSelectedType] = useState(null);
+    const [message, setMessage]         = useState("");
+    const [url, setUrl]                 = useState("");
+    const [sending, setSending]         = useState(false);
+
+    // Pre-fill from first type once loaded
+    useEffect(() => {
+      if (types && types.length > 0 && !selectedType) {
+        setSelectedType(types[0]);
+        setMessage(types[0].default_message || "");
+        setUrl(types[0].default_url || "");
+      }
+    }, [types]);
 
     function handleTypeChange(typeId) {
       const t = (types || []).find(t => String(t.id) === String(typeId));
@@ -91,18 +158,9 @@
     }
 
     async function handleSend() {
-      if (!message.trim()) {
-        toast("Message is required", "err");
-        return;
-      }
-      if (!url.trim()) {
-        toast("URL is required", "err");
-        return;
-      }
-      if (!selectedType) {
-        toast("Select a notification type", "err");
-        return;
-      }
+      if (!message.trim()) { toast("Message is required", "err"); return; }
+      if (!url.trim())     { toast("Link is required", "err");    return; }
+      if (!selectedType)   { toast("Select a notification type", "err"); return; }
 
       setSending(true);
       try {
@@ -127,117 +185,228 @@
       }
     }
 
-    const overlayStyle = {
-      position: "fixed", inset: 0,
-      background: "rgba(0,0,0,0.65)",
-      display: "flex", alignItems: "center", justifyContent: "center",
-      zIndex: 8500, padding: 20,
-    };
+    return R.createElement(ModalOverlay, { onClose },
+      R.createElement("div", { style: { fontSize: 16, fontWeight: 600, color: "var(--t1)", marginBottom: 22 } }, "Send Notification"),
 
-    const cardStyle = {
-      width: "100%", maxWidth: 480,
-      background: "var(--s2)",
-      border: "0.5px solid var(--b2)",
-      borderRadius: 16,
-      padding: 28,
-      position: "relative",
-      maxHeight: "90vh",
-      overflowY: "auto",
-    };
-
-    return R.createElement("div", {
-      style: overlayStyle,
-      onClick: e => e.target === e.currentTarget && onClose(),
-    },
-      R.createElement("div", { style: cardStyle },
-
-        // Header
-        R.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 22 } },
-          R.createElement("div", { style: { fontSize: 16, fontWeight: 600, color: "var(--t1)" } }, "Send Notification"),
-          R.createElement("button", {
-            onClick: onClose,
-            style: { background: "none", border: "none", color: "var(--t4)", fontSize: 18, cursor: "pointer", lineHeight: 1 },
-          }, "✕")
-        ),
-
-        // Recipient
-        R.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", background: "var(--s3)", borderRadius: 10, marginBottom: 20 } },
-          R.createElement(Av, { user: targetUser, size: 36 }),
-          R.createElement("div", null,
-            R.createElement("div", { style: { fontSize: 13, fontWeight: 500, color: "var(--t1)" } }, targetUser.username),
-            R.createElement("div", { style: { fontSize: 11, color: "var(--t4)", marginTop: 2 } }, "Recipient")
-          )
-        ),
-
-        // Notification type
-        R.createElement("div", { className: "fg" },
-          R.createElement("label", { className: "fl" }, "Notification type"),
-          types === null
-            ? R.createElement("div", { style: { padding: "10px 0", color: "var(--t5)", fontSize: 13 } },
-                R.createElement("i", { className: "fa-solid fa-spinner fa-spin", style: { marginRight: 8 } }),
-                "Loading types…"
-              )
-            : types.length === 0
-            ? R.createElement("div", { style: { padding: "10px 0", color: "var(--red)", fontSize: 13 } },
-                "No active notification types. Create one in the admin panel first."
-              )
-            : R.createElement(window.NexusComponents.Select, {
-                value: selectedType ? String(selectedType.id) : "",
-                onChange: handleTypeChange,
-                options: types.map(t => ({ value: String(t.id), label: t.name })),
-                disabled: sending,
-              })
-        ),
-
-        // Message
-        R.createElement("div", { className: "fg" },
-          R.createElement("label", { className: "fl" }, "Message"),
-          R.createElement("textarea", {
-            className: "fi",
-            value: message,
-            onChange: e => setMessage(e.target.value),
-            placeholder: "Notification message…",
-            rows: 4,
-            style: { resize: "vertical" },
-            disabled: sending,
-          })
-        ),
-
-        // URL
-        R.createElement("div", { className: "fg" },
-          R.createElement("label", { className: "fl" }, "Link"),
-          R.createElement("input", {
-            className: "fi",
-            value: url,
-            onChange: e => setUrl(e.target.value),
-            placeholder: "https://",
-            disabled: sending,
-          }),
-          R.createElement("div", { className: "f-hint" }, "Where the notification navigates when clicked")
-        ),
-
-        // Actions
-        R.createElement("div", { style: { display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 4 } },
-          R.createElement("button", { className: "btn-ghost", onClick: onClose, disabled: sending }, "Cancel"),
-          R.createElement("button", {
-            className: "btn-primary",
-            onClick: handleSend,
-            disabled: sending || types === null || types.length === 0,
-          }, sending ? "Sending…" : "Send notification")
+      // Recipient
+      R.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", background: "var(--s3)", borderRadius: 10, marginBottom: 20 } },
+        R.createElement(Av, { user: targetUser, size: 36 }),
+        R.createElement("div", null,
+          R.createElement("div", { style: { fontSize: 13, fontWeight: 500, color: "var(--t1)" } }, targetUser.username),
+          R.createElement("div", { style: { fontSize: 11, color: "var(--t4)", marginTop: 2 } }, "Recipient")
         )
-      )
+      ),
+
+      R.createElement(NotificationFields, {
+        types, selectedType, onTypeChange: handleTypeChange,
+        message, onMessage: setMessage,
+        url, onUrl: setUrl,
+        disabled: sending,
+      }),
+
+      R.createElement(ModalActions, { onClose, onSend: handleSend, sending,
+        canSend: !!(selectedType && types && types.length > 0) })
     );
   }
 
   // ---------------------------------------------------------------------------
-  // ModalHost — mounts in a separate React root on document.body.
-  // Provides showSendModal / hideSendModal to the rest of the bundle.
+  // BroadcastModal — fan-out to all members or a group (from account action)
+  // ---------------------------------------------------------------------------
+
+  function BroadcastModal({ onClose }) {
+    const types                           = useTypes();
+    const [selectedType, setSelectedType] = useState(null);
+    const [message, setMessage]           = useState("");
+    const [url, setUrl]                   = useState("");
+    const [mode, setMode]                 = useState("all"); // "all" | "group"
+    const [groups, setGroups]             = useState(null);
+    const [selectedGroupId, setSelectedGroupId] = useState(null);
+    const [sending, setSending]           = useState(false);
+
+    // Pre-fill from first type once loaded
+    useEffect(() => {
+      if (types && types.length > 0 && !selectedType) {
+        setSelectedType(types[0]);
+        setMessage(types[0].default_message || "");
+        setUrl(types[0].default_url || "");
+      }
+    }, [types]);
+
+    // Load groups for the group picker
+    useEffect(() => {
+      apiGet("/groups").then(d => {
+        if (d.groups) {
+          setGroups(d.groups);
+          if (d.groups.length > 0) setSelectedGroupId(d.groups[0].id);
+        } else {
+          setGroups([]);
+        }
+      }).catch(() => setGroups([]));
+    }, []);
+
+    function handleTypeChange(typeId) {
+      const t = (types || []).find(t => String(t.id) === String(typeId));
+      if (!t) return;
+      setSelectedType(t);
+      setMessage(t.default_message || "");
+      setUrl(t.default_url || "");
+    }
+
+    const selectedGroup = (groups || []).find(g => g.id === selectedGroupId);
+    const estimatedLabel = mode === "all"
+      ? "all active members"
+      : selectedGroup
+        ? `${selectedGroup.member_count} member${selectedGroup.member_count !== 1 ? "s" : ""} in ${selectedGroup.name}`
+        : "group members";
+
+    async function handleSend() {
+      if (!message.trim()) { toast("Message is required", "err"); return; }
+      if (!url.trim())     { toast("Link is required", "err");    return; }
+      if (!selectedType)   { toast("Select a notification type", "err"); return; }
+      if (mode === "group" && !selectedGroupId) { toast("Select a group", "err"); return; }
+
+      setSending(true);
+      try {
+        const result = await apiPost("/broadcast", {
+          mode:     mode,
+          group_id: mode === "group" ? selectedGroupId : null,
+          message:  message.trim(),
+          url:      url.trim(),
+          icon:     selectedType.default_icon || "fa-bell",
+          excerpt:  selectedType.excerpt || "",
+        });
+
+        if (result.ok) {
+          const count = result.estimated_count;
+          toast(`Sending to ${count} recipient${count !== 1 ? "s" : ""}…`);
+          onClose();
+        } else {
+          toast(result.error || "Failed to send broadcast", "err");
+        }
+      } catch {
+        toast("Request failed", "err");
+      } finally {
+        setSending(false);
+      }
+    }
+
+    return R.createElement(ModalOverlay, { onClose },
+      R.createElement("div", { style: { fontSize: 16, fontWeight: 600, color: "var(--t1)", marginBottom: 22 } }, "Send Broadcast"),
+
+      // Target selector
+      R.createElement("div", { className: "fg" },
+        R.createElement("label", { className: "fl" }, "Recipients"),
+        R.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 10 } },
+          R.createElement("button", {
+            className: mode === "all" ? "btn-primary" : "btn-ghost",
+            style: { fontSize: 13, padding: "6px 16px" },
+            onClick: () => setMode("all"),
+            disabled: sending,
+          }, "All members"),
+          R.createElement("button", {
+            className: mode === "group" ? "btn-primary" : "btn-ghost",
+            style: { fontSize: 13, padding: "6px 16px" },
+            onClick: () => setMode("group"),
+            disabled: sending,
+          }, "Specific group")
+        ),
+
+        // Group picker — shown only when mode is "group"
+        mode === "group" && (
+          groups === null
+            ? R.createElement("div", { style: { color: "var(--t5)", fontSize: 13, padding: "6px 0" } },
+                R.createElement("i", { className: "fa-solid fa-spinner fa-spin", style: { marginRight: 8 } }),
+                "Loading groups…"
+              )
+            : groups.length === 0
+            ? R.createElement("div", { style: { color: "var(--t5)", fontSize: 13, padding: "6px 0" } },
+                "No groups found."
+              )
+            : R.createElement(window.NexusComponents.Select, {
+                value: selectedGroupId ? String(selectedGroupId) : "",
+                onChange: val => setSelectedGroupId(parseInt(val, 10)),
+                options: groups.map(g => ({
+                  value: String(g.id),
+                  label: `${g.name} (${g.member_count})`,
+                })),
+                disabled: sending,
+              })
+        ),
+
+        // Estimated recipients note
+        R.createElement("div", { className: "f-hint", style: { marginTop: 6 } },
+          `This will send to ${estimatedLabel}`
+        )
+      ),
+
+      R.createElement(NotificationFields, {
+        types, selectedType, onTypeChange: handleTypeChange,
+        message, onMessage: setMessage,
+        url, onUrl: setUrl,
+        disabled: sending,
+      }),
+
+      R.createElement(ModalActions, { onClose, onSend: handleSend, sending,
+        sendLabel: "Send broadcast",
+        canSend: !!(selectedType && types && types.length > 0 && (mode === "all" || selectedGroupId)) })
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Shared modal chrome
+  // ---------------------------------------------------------------------------
+
+  function ModalOverlay({ onClose, children }) {
+    return R.createElement("div", {
+      style: {
+        position: "fixed", inset: 0,
+        background: "rgba(0,0,0,0.65)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        zIndex: 8500, padding: 20,
+      },
+      onClick: e => e.target === e.currentTarget && onClose(),
+    },
+      R.createElement("div", {
+        style: {
+          width: "100%", maxWidth: 480,
+          background: "var(--s2)",
+          border: "0.5px solid var(--b2)",
+          borderRadius: 16,
+          padding: 28,
+          maxHeight: "90vh",
+          overflowY: "auto",
+          position: "relative",
+        },
+      },
+        R.createElement("button", {
+          onClick: onClose,
+          style: { position: "absolute", top: 16, right: 18, background: "none", border: "none", color: "var(--t4)", fontSize: 18, cursor: "pointer", lineHeight: 1 },
+        }, "✕"),
+        ...children
+      )
+    );
+  }
+
+  function ModalActions({ onClose, onSend, sending, sendLabel = "Send notification", canSend }) {
+    return R.createElement("div", { style: { display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 4 } },
+      R.createElement("button", { className: "btn-ghost", onClick: onClose, disabled: sending }, "Cancel"),
+      R.createElement("button", {
+        className: "btn-primary",
+        onClick: onSend,
+        disabled: sending || !canSend,
+      }, sending ? "Sending…" : sendLabel)
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // ModalHost — single React root on body that handles both modal types
   // ---------------------------------------------------------------------------
 
   let _setModalState = null;
 
   function ModalHost() {
-    const [modal, setModal] = useState(null); // null | { targetUser }
+    const [modal, setModal] = useState(null);
+    // modal: null | { kind: "send", targetUser } | { kind: "broadcast" }
 
     useEffect(() => {
       _setModalState = setModal;
@@ -246,19 +415,31 @@
 
     if (!modal) return null;
 
-    return R.createElement(SendModal, {
-      targetUser: modal.targetUser,
-      onClose: () => setModal(null),
-    });
+    if (modal.kind === "send") {
+      return R.createElement(SendModal, {
+        targetUser: modal.targetUser,
+        onClose: () => setModal(null),
+      });
+    }
+
+    if (modal.kind === "broadcast") {
+      return R.createElement(BroadcastModal, {
+        onClose: () => setModal(null),
+      });
+    }
+
+    return null;
   }
 
   function showSendModal(targetUser) {
-    if (_setModalState) {
-      _setModalState({ targetUser });
-    }
+    if (_setModalState) _setModalState({ kind: "send", targetUser });
   }
 
-  // Mount the modal host into a dedicated div on body
+  function showBroadcastModal() {
+    if (_setModalState) _setModalState({ kind: "broadcast" });
+  }
+
+  // Mount the modal host
   (function mountModalHost() {
     const container = document.createElement("div");
     container.id = "nh-modal-host";
@@ -291,25 +472,19 @@
     }
 
     async function handleSave() {
-      if (!form.name.trim()) {
-        toast("Name is required", "err");
-        return;
-      }
+      if (!form.name.trim()) { toast("Name is required", "err"); return; }
       setSaving(true);
       try {
-        let result;
-        if (isEdit) {
-          result = await apiPatch(`/types/${existing.id}`, form);
-        } else {
-          result = await apiPost("/types", form);
-        }
+        const result = isEdit
+          ? await apiPatch(`/types/${existing.id}`, form)
+          : await apiPost("/types", form);
+
         if (result.type) {
           toast(isEdit ? "Notification type updated" : "Notification type created");
           onSaved(result.type);
           onClose();
         } else {
-          const msg = result.errors?.name?.[0] || result.error || "Save failed";
-          toast(msg, "err");
+          toast(result.errors?.name?.[0] || result.error || "Save failed", "err");
         }
       } catch {
         toast("Request failed", "err");
@@ -318,146 +493,70 @@
       }
     }
 
-    const overlayStyle = {
-      position: "fixed", inset: 0,
-      background: "rgba(0,0,0,0.6)",
-      display: "flex", alignItems: "center", justifyContent: "center",
-      zIndex: 600, padding: 20,
-    };
-    const cardStyle = {
-      width: "100%", maxWidth: 520,
-      background: "var(--s2)",
-      border: "0.5px solid var(--b2)",
-      borderRadius: 16,
-      padding: 28,
-      position: "relative",
-      maxHeight: "90vh",
-      overflowY: "auto",
-    };
-
-    return R.createElement("div", { style: overlayStyle, onClick: e => e.target === e.currentTarget && onClose() },
-      R.createElement("div", { style: cardStyle },
-
-        // Header
+    return R.createElement("div", {
+      style: {
+        position: "fixed", inset: 0,
+        background: "rgba(0,0,0,0.6)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        zIndex: 600, padding: 20,
+      },
+      onClick: e => e.target === e.currentTarget && onClose(),
+    },
+      R.createElement("div", {
+        style: {
+          width: "100%", maxWidth: 520,
+          background: "var(--s2)", border: "0.5px solid var(--b2)",
+          borderRadius: 16, padding: 28,
+          maxHeight: "90vh", overflowY: "auto",
+        },
+      },
         R.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 22 } },
           R.createElement("div", { style: { fontSize: 16, fontWeight: 600, color: "var(--t1)" } },
             isEdit ? "Edit Notification Type" : "Add Notification Type"
           ),
-          R.createElement("button", {
-            onClick: onClose,
-            style: { background: "none", border: "none", color: "var(--t4)", fontSize: 18, cursor: "pointer", lineHeight: 1 },
-          }, "✕")
+          R.createElement("button", { onClick: onClose, style: { background: "none", border: "none", color: "var(--t4)", fontSize: 18, cursor: "pointer", lineHeight: 1 } }, "✕")
         ),
 
-        // Name
         R.createElement("div", { className: "fg" },
           R.createElement("label", { className: "fl" }, "Name"),
-          R.createElement("input", {
-            className: "fi",
-            value: form.name,
-            onChange: e => setField("name", e.target.value),
-            placeholder: "e.g. Announcement, Warning",
-            disabled: saving,
-          })
+          R.createElement("input", { className: "fi", value: form.name, onChange: e => setField("name", e.target.value), placeholder: "e.g. Announcement, Warning", disabled: saving })
         ),
-
-        // Description
         R.createElement("div", { className: "fg" },
           R.createElement("label", { className: "fl" }, "Description"),
-          R.createElement("input", {
-            className: "fi",
-            value: form.description,
-            onChange: e => setField("description", e.target.value),
-            placeholder: "Short description of when this type is used",
-            disabled: saving,
-          })
+          R.createElement("input", { className: "fi", value: form.description, onChange: e => setField("description", e.target.value), placeholder: "Short description of when this type is used", disabled: saving })
         ),
-
-        // Default icon
         R.createElement("div", { className: "fg" },
           R.createElement("label", { className: "fl" }, "Default icon"),
           R.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
-            R.createElement("input", {
-              className: "fi",
-              value: form.default_icon,
-              onChange: e => setField("default_icon", e.target.value),
-              placeholder: "fa-bell",
-              disabled: saving,
-              style: { flex: 1 },
-            }),
-            R.createElement("i", {
-              className: `fa-solid ${form.default_icon || "fa-bell"}`,
-              style: { fontSize: 18, color: "var(--ac)", flexShrink: 0 },
-            })
+            R.createElement("input", { className: "fi", value: form.default_icon, onChange: e => setField("default_icon", e.target.value), placeholder: "fa-bell", disabled: saving, style: { flex: 1 } }),
+            R.createElement("i", { className: `fa-solid ${form.default_icon || "fa-bell"}`, style: { fontSize: 18, color: "var(--ac)", flexShrink: 0 } })
           ),
           R.createElement("div", { className: "f-hint" }, "Font Awesome solid icon class, e.g. fa-bell, fa-megaphone")
         ),
-
-        // Default message
         R.createElement("div", { className: "fg" },
           R.createElement("label", { className: "fl" }, "Default message"),
-          R.createElement("textarea", {
-            className: "fi",
-            value: form.default_message,
-            onChange: e => setField("default_message", e.target.value),
-            placeholder: "Pre-filled message when this type is selected",
-            disabled: saving,
-            rows: 3,
-            style: { resize: "vertical" },
-          })
+          R.createElement("textarea", { className: "fi", value: form.default_message, onChange: e => setField("default_message", e.target.value), placeholder: "Pre-filled message when this type is selected", disabled: saving, rows: 3, style: { resize: "vertical" } })
         ),
-
-        // Default URL
         R.createElement("div", { className: "fg" },
           R.createElement("label", { className: "fl" }, "Default URL"),
-          R.createElement("input", {
-            className: "fi",
-            value: form.default_url,
-            onChange: e => setField("default_url", e.target.value),
-            placeholder: "https://",
-            disabled: saving,
-          })
+          R.createElement("input", { className: "fi", value: form.default_url, onChange: e => setField("default_url", e.target.value), placeholder: "https://", disabled: saving })
         ),
-
-        // Excerpt
         R.createElement("div", { className: "fg" },
           R.createElement("label", { className: "fl" }, "Excerpt"),
-          R.createElement("input", {
-            className: "fi",
-            value: form.excerpt,
-            onChange: e => setField("excerpt", e.target.value),
-            placeholder: "Short text shown below the notification title",
-            disabled: saving,
-          })
+          R.createElement("input", { className: "fi", value: form.excerpt, onChange: e => setField("excerpt", e.target.value), placeholder: "Short text shown below the notification title", disabled: saving })
         ),
-
-        // Sort order
         R.createElement("div", { className: "fg" },
           R.createElement("label", { className: "fl" }, "Sort order"),
-          R.createElement("input", {
-            className: "fi",
-            type: "number",
-            value: form.sort_order,
-            onChange: e => setField("sort_order", parseInt(e.target.value, 10) || 0),
-            disabled: saving,
-            style: { width: 100 },
-          }),
+          R.createElement("input", { className: "fi", type: "number", value: form.sort_order, onChange: e => setField("sort_order", parseInt(e.target.value, 10) || 0), disabled: saving, style: { width: 100 } }),
           R.createElement("div", { className: "f-hint" }, "Lower numbers appear first in the send modal dropdown")
         ),
-
-        // Active toggle
         R.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 0", borderBottom: "0.5px solid var(--b1)", marginBottom: 22 } },
           R.createElement("div", null,
             R.createElement("div", { style: { fontSize: 13, color: "var(--t2)", fontWeight: 500 } }, "Active"),
             R.createElement("div", { style: { fontSize: 12, color: "var(--t4)", marginTop: 2 } }, "Inactive types are hidden from the send modal")
           ),
-          R.createElement(window.NexusComponents.Toggle, {
-            value: form.is_active,
-            onChange: v => setField("is_active", v),
-          })
+          R.createElement(window.NexusComponents.Toggle, { value: form.is_active, onChange: v => setField("is_active", v) })
         ),
-
-        // Actions
         R.createElement("div", { style: { display: "flex", gap: 10, justifyContent: "flex-end" } },
           R.createElement("button", { className: "btn-ghost", onClick: onClose, disabled: saving }, "Cancel"),
           R.createElement("button", { className: "btn-primary", onClick: handleSave, disabled: saving },
@@ -469,12 +568,12 @@
   }
 
   // ---------------------------------------------------------------------------
-  // TypesTable — lists all notification types with edit/delete actions
+  // TypesTable — admin panel type management
   // ---------------------------------------------------------------------------
 
   function TypesTable() {
     const [types, setTypes]       = useState(null);
-    const [modal, setModal]       = useState(null); // null | "create" | { type }
+    const [modal, setModal]       = useState(null);
     const [deleting, setDeleting] = useState(null);
 
     const load = useCallback(() => {
@@ -513,27 +612,11 @@
       });
     }
 
-    if (types === null) {
-      return R.createElement("div", { style: { padding: "48px 0", textAlign: "center", color: "var(--t5)", fontSize: 13 } },
-        R.createElement("i", { className: "fa-solid fa-spinner fa-spin" })
-      );
-    }
-
-    if (types === "forbidden") {
-      return R.createElement("div", { style: { padding: "48px 0", textAlign: "center", color: "var(--t5)", fontSize: 13 } },
-        "You don't have permission to manage notification types."
-      );
-    }
-
-    if (types === "error") {
-      return R.createElement("div", { style: { padding: "48px 0", textAlign: "center", color: "var(--red)", fontSize: 13 } },
-        "Failed to load notification types."
-      );
-    }
+    if (types === null) return R.createElement("div", { style: { padding: "48px 0", textAlign: "center", color: "var(--t5)", fontSize: 13 } }, R.createElement("i", { className: "fa-solid fa-spinner fa-spin" }));
+    if (types === "forbidden") return R.createElement("div", { style: { padding: "48px 0", textAlign: "center", color: "var(--t5)", fontSize: 13 } }, "You don't have permission to manage notification types.");
+    if (types === "error") return R.createElement("div", { style: { padding: "48px 0", textAlign: "center", color: "var(--red)", fontSize: 13 } }, "Failed to load notification types.");
 
     return R.createElement("div", null,
-
-      // Toolbar
       R.createElement("div", { style: { display: "flex", justifyContent: "flex-end", marginBottom: 16 } },
         R.createElement("button", { className: "btn-primary", onClick: () => setModal("create") },
           R.createElement("i", { className: "fa-solid fa-plus", style: { marginRight: 7 } }),
@@ -541,11 +624,8 @@
         )
       ),
 
-      // Empty state
       types.length === 0
-        ? R.createElement("div", { style: { padding: "48px 0", textAlign: "center", color: "var(--t5)", fontSize: 13, border: "0.5px solid var(--b1)", borderRadius: 12 } },
-            "No notification types yet. Add one to get started."
-          )
+        ? R.createElement("div", { style: { padding: "48px 0", textAlign: "center", color: "var(--t5)", fontSize: 13, border: "0.5px solid var(--b1)", borderRadius: 12 } }, "No notification types yet. Add one to get started.")
         : R.createElement("div", { className: "atbl-wrap" },
             R.createElement("table", { className: "atbl", style: { width: "100%" } },
               R.createElement("thead", null,
@@ -564,32 +644,18 @@
                       R.createElement("div", { style: { fontWeight: 500, color: "var(--t1)", fontSize: 13 } }, type.name),
                       type.description && R.createElement("div", { style: { fontSize: 11, color: "var(--t4)", marginTop: 2 } }, type.description)
                     ),
-                    R.createElement("td", null,
-                      R.createElement("i", { className: `fa-solid ${type.default_icon || "fa-bell"}`, style: { color: "var(--ac)" } })
-                    ),
+                    R.createElement("td", null, R.createElement("i", { className: `fa-solid ${type.default_icon || "fa-bell"}`, style: { color: "var(--ac)" } })),
                     R.createElement("td", null,
                       R.createElement("span", {
                         className: "sp-tag",
-                        style: {
-                          color: type.is_active ? "var(--green)" : "var(--t5)",
-                          border: `0.5px solid ${type.is_active ? "var(--green)" : "var(--b2)"}`,
-                        },
+                        style: { color: type.is_active ? "var(--green)" : "var(--t5)", border: `0.5px solid ${type.is_active ? "var(--green)" : "var(--b2)"}` },
                       }, type.is_active ? "Active" : "Inactive")
                     ),
                     R.createElement("td", { style: { color: "var(--t4)", fontSize: 12 } }, type.sort_order),
                     R.createElement("td", null,
                       R.createElement("div", { style: { display: "flex", gap: 8 } },
-                        R.createElement("button", {
-                          className: "btn-ghost",
-                          style: { fontSize: 12, padding: "4px 12px" },
-                          onClick: () => setModal({ type }),
-                        }, "Edit"),
-                        R.createElement("button", {
-                          className: "btn-ghost",
-                          style: { fontSize: 12, padding: "4px 12px", color: "var(--red)", borderColor: "var(--red)" },
-                          onClick: () => handleDelete(type),
-                          disabled: deleting === type.id,
-                        }, deleting === type.id ? "…" : "Delete")
+                        R.createElement("button", { className: "btn-ghost", style: { fontSize: 12, padding: "4px 12px" }, onClick: () => setModal({ type }) }, "Edit"),
+                        R.createElement("button", { className: "btn-ghost", style: { fontSize: 12, padding: "4px 12px", color: "var(--red)", borderColor: "var(--red)" }, onClick: () => handleDelete(type), disabled: deleting === type.id }, deleting === type.id ? "…" : "Delete")
                       )
                     )
                   )
@@ -598,17 +664,8 @@
             )
           ),
 
-      // Modal
-      modal === "create" && R.createElement(TypeModal, {
-        existing: null,
-        onClose: () => setModal(null),
-        onSaved: handleSaved,
-      }),
-      modal?.type && R.createElement(TypeModal, {
-        existing: modal.type,
-        onClose: () => setModal(null),
-        onSaved: handleSaved,
-      })
+      modal === "create" && R.createElement(TypeModal, { existing: null, onClose: () => setModal(null), onSaved: handleSaved }),
+      modal?.type && R.createElement(TypeModal, { existing: modal.type, onClose: () => setModal(null), onSaved: handleSaved })
     );
   }
 
@@ -618,16 +675,13 @@
 
   function AdminPanel() {
     const { TabbedPanel } = window.NexusExtensionTemplates;
-
     return R.createElement(TabbedPanel, {
-      tabs: [
-        {
-          key:    "types",
-          label:  "Notification Types",
-          icon:   "fa-list",
-          render: () => R.createElement(TypesTable),
-        },
-      ],
+      tabs: [{
+        key:    "types",
+        label:  "Notification Types",
+        icon:   "fa-list",
+        render: () => R.createElement(TypesTable),
+      }],
     });
   }
 
@@ -647,10 +701,6 @@
       const url = n.data?.url;
       if (!url) return;
 
-      // If the URL is absolute but points at this same origin, strip the origin
-      // so the SPA router can handle it as a path. This covers cases where the
-      // sender typed a full URL like https://example.com/post/123 when the
-      // notification is for this forum.
       let resolved = url;
       try {
         const parsed = new URL(url);
@@ -658,20 +708,19 @@
           resolved = parsed.pathname + parsed.search + parsed.hash;
         }
       } catch {
-        // url is already a relative path — use as-is
+        // already a relative path
       }
 
       if (resolved.startsWith("/")) {
         window.NexusExtensions.navigate(resolved);
       } else {
-        // Truly external URL — navigate in the same tab to avoid popup blockers.
         window.location.href = resolved;
       }
     },
   });
 
   // ---------------------------------------------------------------------------
-  // User card action — "Send Notification" on another user's card
+  // User card action — individual send
   // ---------------------------------------------------------------------------
 
   NE.registerUserAction({
@@ -681,13 +730,27 @@
     authOnly: true,
     priority: 50,
     onClick({ user, currentUser, closeCard }) {
-      // Don't send notifications to yourself
       if (currentUser && user.id === currentUser.id) {
         toast("You cannot send a notification to yourself", "warn");
         return;
       }
       closeCard();
       showSendModal(user);
+    },
+  });
+
+  // ---------------------------------------------------------------------------
+  // Account action — broadcast send
+  // ---------------------------------------------------------------------------
+
+  NE.registerAccountAction({
+    id:       "notification-hub-broadcast",
+    label:    "Send Broadcast",
+    icon:     "fa-bullhorn",
+    priority: 50,
+    onClick({ close }) {
+      close();
+      showBroadcastModal();
     },
   });
 

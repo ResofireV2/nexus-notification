@@ -7,6 +7,8 @@ defmodule NotificationHub.ApiRouter do
   alias NotificationHub.Type
   alias Nexus.Repo
   alias Nexus.Extensions.Permissions
+  alias Nexus.Accounts.User
+  alias Nexus.Groups.GroupMembership
 
   plug :match
   plug :dispatch
@@ -26,8 +28,7 @@ defmodule NotificationHub.ApiRouter do
         |> send_resp(403, Jason.encode!(%{error: "Forbidden"}))
 
       :ok ->
-        types =
-          Repo.all(from t in Type, order_by: [asc: t.sort_order, asc: t.id])
+        types = Repo.all(from t in Type, order_by: [asc: t.sort_order, asc: t.id])
 
         conn
         |> put_resp_content_type("application/json")
@@ -70,11 +71,10 @@ defmodule NotificationHub.ApiRouter do
             |> send_resp(201, Jason.encode!(%{type: type_json(type)}))
 
           {:error, changeset} ->
-            errors = format_errors(changeset)
             conn
             |> put_status(422)
             |> put_resp_content_type("application/json")
-            |> send_resp(422, Jason.encode!(%{errors: errors}))
+            |> send_resp(422, Jason.encode!(%{errors: format_errors(changeset)}))
         end
     end
   end
@@ -122,11 +122,10 @@ defmodule NotificationHub.ApiRouter do
                 |> send_resp(200, Jason.encode!(%{type: type_json(updated)}))
 
               {:error, changeset} ->
-                errors = format_errors(changeset)
                 conn
                 |> put_status(422)
                 |> put_resp_content_type("application/json")
-                |> send_resp(422, Jason.encode!(%{errors: errors}))
+                |> send_resp(422, Jason.encode!(%{errors: format_errors(changeset)}))
             end
         end
     end
@@ -221,6 +220,129 @@ defmodule NotificationHub.ApiRouter do
             conn
             |> put_resp_content_type("application/json")
             |> send_resp(200, Jason.encode!(%{ok: true}))
+        end
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # GET /groups — list all groups (for broadcast recipient picker)
+  # ---------------------------------------------------------------------------
+
+  get "/groups" do
+    user = conn.assigns[:current_user]
+
+    case Permissions.check("notification-hub", "can_send_broadcast", user) do
+      :error ->
+        conn
+        |> put_status(403)
+        |> put_resp_content_type("application/json")
+        |> send_resp(403, Jason.encode!(%{error: "Forbidden"}))
+
+      :ok ->
+        groups       = Nexus.Groups.list_groups()
+        member_counts = Nexus.Groups.member_counts()
+
+        group_list =
+          Enum.map(groups, fn g ->
+            %{
+              id:           g.id,
+              name:         g.name,
+              slug:         g.slug,
+              member_count: Map.get(member_counts, g.id, 0)
+            }
+          end)
+
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(200, Jason.encode!(%{groups: group_list}))
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # POST /broadcast — fan-out a notification to all members or a group
+  # ---------------------------------------------------------------------------
+
+  post "/broadcast" do
+    user = conn.assigns[:current_user]
+
+    case Permissions.check("notification-hub", "can_send_broadcast", user) do
+      :error ->
+        conn
+        |> put_status(403)
+        |> put_resp_content_type("application/json")
+        |> send_resp(403, Jason.encode!(%{error: "Forbidden"}))
+
+      :ok ->
+        params   = conn.body_params
+        mode     = params["mode"]
+        group_id = params["group_id"]
+        message  = params["message"]
+        url      = params["url"]
+        icon     = params["icon"] || "fa-bell"
+        excerpt  = params["excerpt"] || ""
+
+        cond do
+          mode not in ["all", "group"] ->
+            conn
+            |> put_status(422)
+            |> put_resp_content_type("application/json")
+            |> send_resp(422, Jason.encode!(%{error: "mode must be \"all\" or \"group\""}))
+
+          mode == "group" and is_nil(group_id) ->
+            conn
+            |> put_status(422)
+            |> put_resp_content_type("application/json")
+            |> send_resp(422, Jason.encode!(%{error: "group_id is required when mode is \"group\""}))
+
+          is_nil(message) or String.trim(message) == "" ->
+            conn
+            |> put_status(422)
+            |> put_resp_content_type("application/json")
+            |> send_resp(422, Jason.encode!(%{error: "message is required"}))
+
+          is_nil(url) or String.trim(url) == "" ->
+            conn
+            |> put_status(422)
+            |> put_resp_content_type("application/json")
+            |> send_resp(422, Jason.encode!(%{error: "url is required"}))
+
+          true ->
+            estimated_count =
+              case mode do
+                "all" ->
+                  Repo.aggregate(
+                    from(u in User, where: u.status == "active" and u.id != ^user.id),
+                    :count
+                  )
+
+                "group" ->
+                  Repo.aggregate(
+                    from(m in GroupMembership,
+                      join: u in User, on: u.id == m.user_id,
+                      where: m.group_id == ^group_id
+                         and u.status == "active"
+                         and u.id != ^user.id
+                    ),
+                    :count
+                  )
+              end
+
+            %{
+              actor_id: user.id,
+              message:  String.trim(message),
+              url:      String.trim(url),
+              icon:     icon,
+              excerpt:  excerpt,
+              mode:     mode,
+              group_id: group_id,
+              after_id: 0
+            }
+            |> NotificationHub.Workers.FanOutCustom.new()
+            |> Oban.insert()
+
+            conn
+            |> put_resp_content_type("application/json")
+            |> send_resp(200, Jason.encode!(%{ok: true, estimated_count: estimated_count}))
         end
     end
   end
