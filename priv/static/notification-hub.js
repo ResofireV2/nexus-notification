@@ -646,12 +646,26 @@
     onClick({ n }) {
       const url = n.data?.url;
       if (!url) return;
-      // Internal SPA paths (start with /) — resolve through the Nexus router.
-      // External URLs — open in a new tab.
-      if (url.startsWith("/")) {
-        window.NexusExtensions.navigate(url);
+
+      // If the URL is absolute but points at this same origin, strip the origin
+      // so the SPA router can handle it as a path. This covers cases where the
+      // sender typed a full URL like https://example.com/post/123 when the
+      // notification is for this forum.
+      let resolved = url;
+      try {
+        const parsed = new URL(url);
+        if (parsed.origin === window.location.origin) {
+          resolved = parsed.pathname + parsed.search + parsed.hash;
+        }
+      } catch {
+        // url is already a relative path — use as-is
+      }
+
+      if (resolved.startsWith("/")) {
+        window.NexusExtensions.navigate(resolved);
       } else {
-        window.open(url, "_blank", "noopener,noreferrer");
+        // Truly external URL — navigate in the same tab to avoid popup blockers.
+        window.location.href = resolved;
       }
     },
   });
