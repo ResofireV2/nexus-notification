@@ -106,16 +106,12 @@
 
       setSending(true);
       try {
-        const result = await window._nexusApi.post("/notifications/extension", {
-          slug:           SLUG,
+        const result = await apiPost("/send", {
           target_user_id: targetUser.id,
-          type:           "notification_hub_custom",
-          data: {
-            message: message.trim(),
-            url:     url.trim(),
-            icon:    selectedType.default_icon || "fa-bell",
-            excerpt: selectedType.excerpt || "",
-          },
+          message:        message.trim(),
+          url:            url.trim(),
+          icon:           selectedType.default_icon || "fa-bell",
+          excerpt:        selectedType.excerpt || "",
         });
 
         if (result.ok) {

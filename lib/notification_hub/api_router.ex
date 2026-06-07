@@ -165,6 +165,67 @@ defmodule NotificationHub.ApiRouter do
   end
 
   # ---------------------------------------------------------------------------
+  # POST /send — deliver a notification to a single user
+  # ---------------------------------------------------------------------------
+
+  post "/send" do
+    user = conn.assigns[:current_user]
+
+    case Permissions.check("notification-hub", "can_send_individual", user) do
+      :error ->
+        conn
+        |> put_status(403)
+        |> put_resp_content_type("application/json")
+        |> send_resp(403, Jason.encode!(%{error: "Forbidden"}))
+
+      :ok ->
+        params = conn.body_params
+
+        target_user_id = params["target_user_id"]
+        message        = params["message"]
+        url            = params["url"]
+        icon           = params["icon"] || "fa-bell"
+        excerpt        = params["excerpt"] || ""
+
+        cond do
+          is_nil(target_user_id) ->
+            conn
+            |> put_status(422)
+            |> put_resp_content_type("application/json")
+            |> send_resp(422, Jason.encode!(%{error: "target_user_id is required"}))
+
+          is_nil(message) or String.trim(message) == "" ->
+            conn
+            |> put_status(422)
+            |> put_resp_content_type("application/json")
+            |> send_resp(422, Jason.encode!(%{error: "message is required"}))
+
+          is_nil(url) or String.trim(url) == "" ->
+            conn
+            |> put_status(422)
+            |> put_resp_content_type("application/json")
+            |> send_resp(422, Jason.encode!(%{error: "url is required"}))
+
+          true ->
+            %{
+              user_id:  target_user_id,
+              actor_id: user.id,
+              message:  String.trim(message),
+              url:      String.trim(url),
+              icon:     icon,
+              excerpt:  excerpt
+            }
+            |> NotificationHub.Workers.DeliverCustom.new()
+            |> Oban.insert()
+
+            conn
+            |> put_resp_content_type("application/json")
+            |> send_resp(200, Jason.encode!(%{ok: true}))
+        end
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # Catch-all
   # ---------------------------------------------------------------------------
 
