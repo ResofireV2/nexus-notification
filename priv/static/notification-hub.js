@@ -4,11 +4,11 @@
   const NE   = window.NexusExtensions;
   const SLUG = "notification-hub";
   const R    = window.React;
-  const { useState, useEffect, useCallback } = R;
-  const { toast } = window.NexusComponents;
+  const { useState, useEffect, useCallback, useRef } = R;
+  const { toast, Av } = window.NexusComponents;
 
   // ---------------------------------------------------------------------------
-  // API helpers
+  // API helpers — extension endpoints
   // ---------------------------------------------------------------------------
 
   function apiGet(path) {
@@ -51,7 +51,227 @@
   }
 
   // ---------------------------------------------------------------------------
-  // TypeModal — create or edit a notification type
+  // SendModal — compose and send a notification to a single user
+  //
+  // Props:
+  //   targetUser   — full user object (id, username, avatar_url, avatar_color)
+  //   onClose      — called when the modal should be dismissed
+  // ---------------------------------------------------------------------------
+
+  function SendModal({ targetUser, onClose }) {
+    const [types, setTypes]         = useState(null);   // null = loading
+    const [selectedType, setSelectedType] = useState(null);
+    const [message, setMessage]     = useState("");
+    const [url, setUrl]             = useState("");
+    const [sending, setSending]     = useState(false);
+
+    // Load active notification types from our extension API
+    useEffect(() => {
+      apiGet("/types").then(d => {
+        if (d.types) {
+          const active = d.types.filter(t => t.is_active);
+          setTypes(active);
+          if (active.length > 0) {
+            setSelectedType(active[0]);
+            setMessage(active[0].default_message || "");
+            setUrl(active[0].default_url || "");
+          }
+        } else {
+          setTypes([]);
+        }
+      }).catch(() => setTypes([]));
+    }, []);
+
+    function handleTypeChange(typeId) {
+      const t = (types || []).find(t => String(t.id) === String(typeId));
+      if (!t) return;
+      setSelectedType(t);
+      setMessage(t.default_message || "");
+      setUrl(t.default_url || "");
+    }
+
+    async function handleSend() {
+      if (!message.trim()) {
+        toast("Message is required", "err");
+        return;
+      }
+      if (!url.trim()) {
+        toast("URL is required", "err");
+        return;
+      }
+      if (!selectedType) {
+        toast("Select a notification type", "err");
+        return;
+      }
+
+      setSending(true);
+      try {
+        const result = await window._nexusApi.post("/notifications/extension", {
+          slug:           SLUG,
+          target_user_id: targetUser.id,
+          type:           "notification_hub_custom",
+          data: {
+            message: message.trim(),
+            url:     url.trim(),
+            icon:    selectedType.default_icon || "fa-bell",
+            excerpt: selectedType.excerpt || "",
+          },
+        });
+
+        if (result.ok) {
+          toast(`Notification sent to ${targetUser.username}`);
+          onClose();
+        } else {
+          toast(result.error || "Failed to send notification", "err");
+        }
+      } catch {
+        toast("Request failed", "err");
+      } finally {
+        setSending(false);
+      }
+    }
+
+    const overlayStyle = {
+      position: "fixed", inset: 0,
+      background: "rgba(0,0,0,0.65)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      zIndex: 8500, padding: 20,
+    };
+
+    const cardStyle = {
+      width: "100%", maxWidth: 480,
+      background: "var(--s2)",
+      border: "0.5px solid var(--b2)",
+      borderRadius: 16,
+      padding: 28,
+      position: "relative",
+      maxHeight: "90vh",
+      overflowY: "auto",
+    };
+
+    return R.createElement("div", {
+      style: overlayStyle,
+      onClick: e => e.target === e.currentTarget && onClose(),
+    },
+      R.createElement("div", { style: cardStyle },
+
+        // Header
+        R.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 22 } },
+          R.createElement("div", { style: { fontSize: 16, fontWeight: 600, color: "var(--t1)" } }, "Send Notification"),
+          R.createElement("button", {
+            onClick: onClose,
+            style: { background: "none", border: "none", color: "var(--t4)", fontSize: 18, cursor: "pointer", lineHeight: 1 },
+          }, "✕")
+        ),
+
+        // Recipient
+        R.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", background: "var(--s3)", borderRadius: 10, marginBottom: 20 } },
+          R.createElement(Av, { user: targetUser, size: 36 }),
+          R.createElement("div", null,
+            R.createElement("div", { style: { fontSize: 13, fontWeight: 500, color: "var(--t1)" } }, targetUser.username),
+            R.createElement("div", { style: { fontSize: 11, color: "var(--t4)", marginTop: 2 } }, "Recipient")
+          )
+        ),
+
+        // Notification type
+        R.createElement("div", { className: "fg" },
+          R.createElement("label", { className: "fl" }, "Notification type"),
+          types === null
+            ? R.createElement("div", { style: { padding: "10px 0", color: "var(--t5)", fontSize: 13 } },
+                R.createElement("i", { className: "fa-solid fa-spinner fa-spin", style: { marginRight: 8 } }),
+                "Loading types…"
+              )
+            : types.length === 0
+            ? R.createElement("div", { style: { padding: "10px 0", color: "var(--red)", fontSize: 13 } },
+                "No active notification types. Create one in the admin panel first."
+              )
+            : R.createElement(window.NexusComponents.Select, {
+                value: selectedType ? String(selectedType.id) : "",
+                onChange: handleTypeChange,
+                options: types.map(t => ({ value: String(t.id), label: t.name })),
+                disabled: sending,
+              })
+        ),
+
+        // Message
+        R.createElement("div", { className: "fg" },
+          R.createElement("label", { className: "fl" }, "Message"),
+          R.createElement("textarea", {
+            className: "fi",
+            value: message,
+            onChange: e => setMessage(e.target.value),
+            placeholder: "Notification message…",
+            rows: 4,
+            style: { resize: "vertical" },
+            disabled: sending,
+          })
+        ),
+
+        // URL
+        R.createElement("div", { className: "fg" },
+          R.createElement("label", { className: "fl" }, "Link"),
+          R.createElement("input", {
+            className: "fi",
+            value: url,
+            onChange: e => setUrl(e.target.value),
+            placeholder: "https://",
+            disabled: sending,
+          }),
+          R.createElement("div", { className: "f-hint" }, "Where the notification navigates when clicked")
+        ),
+
+        // Actions
+        R.createElement("div", { style: { display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 4 } },
+          R.createElement("button", { className: "btn-ghost", onClick: onClose, disabled: sending }, "Cancel"),
+          R.createElement("button", {
+            className: "btn-primary",
+            onClick: handleSend,
+            disabled: sending || types === null || types.length === 0,
+          }, sending ? "Sending…" : "Send notification")
+        )
+      )
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // ModalHost — mounts in a separate React root on document.body.
+  // Provides showSendModal / hideSendModal to the rest of the bundle.
+  // ---------------------------------------------------------------------------
+
+  let _setModalState = null;
+
+  function ModalHost() {
+    const [modal, setModal] = useState(null); // null | { targetUser }
+
+    useEffect(() => {
+      _setModalState = setModal;
+      return () => { _setModalState = null; };
+    }, []);
+
+    if (!modal) return null;
+
+    return R.createElement(SendModal, {
+      targetUser: modal.targetUser,
+      onClose: () => setModal(null),
+    });
+  }
+
+  function showSendModal(targetUser) {
+    if (_setModalState) {
+      _setModalState({ targetUser });
+    }
+  }
+
+  // Mount the modal host into a dedicated div on body
+  (function mountModalHost() {
+    const container = document.createElement("div");
+    container.id = "nh-modal-host";
+    document.body.appendChild(container);
+    window.ReactDOM.createRoot(container).render(R.createElement(ModalHost));
+  })();
+
+  // ---------------------------------------------------------------------------
+  // TypeModal — create or edit a notification type (admin panel)
   // ---------------------------------------------------------------------------
 
   function TypeModal({ existing, onClose, onSaved }) {
@@ -397,7 +617,7 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Admin panel — TabbedPanel with a Types tab (more tabs coming in later stages)
+  // Admin panel
   // ---------------------------------------------------------------------------
 
   function AdminPanel() {
@@ -434,7 +654,28 @@
   });
 
   // ---------------------------------------------------------------------------
-  // Register admin panel
+  // User card action — "Send Notification" on another user's card
+  // ---------------------------------------------------------------------------
+
+  NE.registerUserAction({
+    id:       "notification-hub-send",
+    label:    "Send Notification",
+    icon:     "fa-bell",
+    authOnly: true,
+    priority: 50,
+    onClick({ user, currentUser, closeCard }) {
+      // Don't send notifications to yourself
+      if (currentUser && user.id === currentUser.id) {
+        toast("You cannot send a notification to yourself", "warn");
+        return;
+      }
+      closeCard();
+      showSendModal(user);
+    },
+  });
+
+  // ---------------------------------------------------------------------------
+  // Admin panel registration
   // ---------------------------------------------------------------------------
 
   NE.registerAdminPanel(SLUG, {

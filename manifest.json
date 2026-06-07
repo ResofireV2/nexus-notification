@@ -3,13 +3,16 @@
   "manifest_version": 2,
   "name": "Notification Hub",
   "slug": "notification-hub",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Send custom notifications to individual users or broadcast to all members.",
   "author": "ResofireV2",
   "homepage": "https://github.com/ResofireV2/nexus-notification",
   "repository": "https://github.com/ResofireV2/nexus-notification",
   "license": "MIT",
-  "tags": ["notifications", "moderation"],
+  "tags": [
+    "notifications",
+    "moderation"
+  ],
   "module": "NotificationHub",
   "js_bundle": "notification-hub.js",
   "permissions": [
@@ -30,8 +33,12 @@
       "label": "Custom notification",
       "description": "A manually composed notification sent by a moderator or admin.",
       "icon": "fa-bell",
-      "channels": ["web"],
-      "default_preferences": { "web": true },
+      "channels": [
+        "web"
+      ],
+      "default_preferences": {
+        "web": true
+      },
       "payload_schema": {
         "message": "The notification message body",
         "url": "The URL the notification navigates to when clicked"
