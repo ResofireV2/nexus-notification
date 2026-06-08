@@ -690,8 +690,6 @@
   // ---------------------------------------------------------------------------
 
   NE.registerNotificationType("notification_hub_custom", {
-    icon:      "fa-bell",
-    iconColor: "var(--ac)",
     renderBody(n) {
       return R.createElement("span", { style: { color: "var(--t2)" } },
         n.data?.message || "You have a new notification"
