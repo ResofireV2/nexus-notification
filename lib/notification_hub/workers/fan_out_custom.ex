@@ -37,9 +37,10 @@ defmodule NotificationHub.Workers.FanOutCustom do
     excerpt  = args["excerpt"] || ""
     mode     = args["mode"]
     group_id = args["group_id"]
+    role     = args["role"]
     after_id = args["after_id"] || 0
 
-    user_ids = fetch_batch(mode, group_id, actor_id, after_id)
+    user_ids = fetch_batch(mode, group_id, role, actor_id, after_id)
 
     Enum.each(user_ids, fn user_id ->
       %{
@@ -64,7 +65,7 @@ defmodule NotificationHub.Workers.FanOutCustom do
     :ok
   end
 
-  defp fetch_batch("all", _group_id, actor_id, after_id) do
+  defp fetch_batch("all", _group_id, _role, actor_id, after_id) do
     Repo.all(
       from u in User,
         where: u.id != ^actor_id
@@ -76,11 +77,24 @@ defmodule NotificationHub.Workers.FanOutCustom do
     )
   end
 
-  defp fetch_batch("group", group_id, actor_id, after_id) do
+  defp fetch_batch("group", group_id, _role, actor_id, after_id) do
     Repo.all(
       from u in User,
         join: m in GroupMembership, on: m.user_id == u.id,
         where: m.group_id == ^group_id
+           and u.id != ^actor_id
+           and u.status == "active"
+           and u.id > ^after_id,
+        order_by: [asc: u.id],
+        select: u.id,
+        limit: @batch_size
+    )
+  end
+
+  defp fetch_batch("role", _group_id, role, actor_id, after_id) do
+    Repo.all(
+      from u in User,
+        where: u.role == ^role
            and u.id != ^actor_id
            and u.status == "active"
            and u.id > ^after_id,

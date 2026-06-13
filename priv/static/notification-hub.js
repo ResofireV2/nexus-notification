@@ -218,9 +218,10 @@
     const [selectedType, setSelectedType] = useState(null);
     const [message, setMessage]           = useState("");
     const [url, setUrl]                   = useState("");
-    const [mode, setMode]                 = useState("all"); // "all" | "group"
+    const [mode, setMode]                 = useState("all"); // "all" | "group" | "role"
     const [groups, setGroups]             = useState(null);
     const [selectedGroupId, setSelectedGroupId] = useState(null);
+    const [selectedRole, setSelectedRole] = useState("member");
     const [sending, setSending]           = useState(false);
 
     // Pre-fill from first type once loaded
@@ -255,21 +256,25 @@
     const selectedGroup = (groups || []).find(g => g.id === selectedGroupId);
     const estimatedLabel = mode === "all"
       ? "all active members"
-      : selectedGroup
-        ? `${selectedGroup.member_count} member${selectedGroup.member_count !== 1 ? "s" : ""} in ${selectedGroup.name}`
-        : "group members";
+      : mode === "role"
+        ? `all active ${selectedRole}s`
+        : selectedGroup
+          ? `${selectedGroup.member_count} member${selectedGroup.member_count !== 1 ? "s" : ""} in ${selectedGroup.name}`
+          : "group members";
 
     async function handleSend() {
       if (!message.trim()) { toast("Message is required", "err"); return; }
       if (!url.trim())     { toast("Link is required", "err");    return; }
       if (!selectedType)   { toast("Select a notification type", "err"); return; }
       if (mode === "group" && !selectedGroupId) { toast("Select a group", "err"); return; }
+      if (mode === "role"  && !selectedRole)    { toast("Select a role",  "err"); return; }
 
       setSending(true);
       try {
         const result = await apiPost("/broadcast", {
           mode:     mode,
           group_id: mode === "group" ? selectedGroupId : null,
+          role:     mode === "role"  ? selectedRole    : null,
           message:  message.trim(),
           url:      url.trim(),
           icon:     selectedType.default_icon || "fa-bell",
@@ -308,7 +313,28 @@
             style: { fontSize: 13, padding: "6px 16px" },
             onClick: () => setMode("group"),
             disabled: sending,
-          }, "Specific group")
+          }, "Specific group"),
+          R.createElement("button", {
+            className: mode === "role" ? "btn-primary" : "btn-ghost",
+            style: { fontSize: 13, padding: "6px 16px" },
+            onClick: () => setMode("role"),
+            disabled: sending,
+          }, "Specific role")
+        ),
+
+        // Role picker — shown only when mode is "role"
+        mode === "role" && (
+          R.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 10 } },
+            ["member", "moderator", "admin"].map(role =>
+              R.createElement("button", {
+                key: role,
+                className: selectedRole === role ? "btn-primary" : "btn-ghost",
+                style: { fontSize: 12, padding: "5px 14px", textTransform: "capitalize" },
+                onClick: () => setSelectedRole(role),
+                disabled: sending,
+              }, role.charAt(0).toUpperCase() + role.slice(1) + "s")
+            )
+          )
         ),
 
         // Group picker — shown only when mode is "group"
@@ -348,7 +374,7 @@
 
       R.createElement(ModalActions, { onClose, onSend: handleSend, sending,
         sendLabel: "Send broadcast",
-        canSend: !!(selectedType && types && types.length > 0 && (mode === "all" || selectedGroupId)) })
+        canSend: !!(selectedType && types && types.length > 0 && (mode === "all" || mode === "role" || selectedGroupId)) })
     );
   }
 

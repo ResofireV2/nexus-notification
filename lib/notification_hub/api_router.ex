@@ -276,23 +276,30 @@ defmodule NotificationHub.ApiRouter do
         params   = conn.body_params
         mode     = params["mode"]
         group_id = params["group_id"]
+        role     = params["role"]
         message  = params["message"]
         url      = params["url"]
         icon     = params["icon"] || "fa-bell"
         excerpt  = params["excerpt"] || ""
 
         cond do
-          mode not in ["all", "group"] ->
+          mode not in ["all", "group", "role"] ->
             conn
             |> put_status(422)
             |> put_resp_content_type("application/json")
-            |> send_resp(422, Jason.encode!(%{error: "mode must be \"all\" or \"group\""}))
+            |> send_resp(422, Jason.encode!(%{error: "mode must be \"all\", \"group\", or \"role\""}))
 
           mode == "group" and is_nil(group_id) ->
             conn
             |> put_status(422)
             |> put_resp_content_type("application/json")
             |> send_resp(422, Jason.encode!(%{error: "group_id is required when mode is \"group\""}))
+
+          mode == "role" and role not in ["member", "moderator", "admin"] ->
+            conn
+            |> put_status(422)
+            |> put_resp_content_type("application/json")
+            |> send_resp(422, Jason.encode!(%{error: "role must be \"member\", \"moderator\", or \"admin\""}))
 
           is_nil(message) or String.trim(message) == "" ->
             conn
@@ -325,6 +332,16 @@ defmodule NotificationHub.ApiRouter do
                     ),
                     :count
                   )
+
+                "role" ->
+                  Repo.aggregate(
+                    from(u in User,
+                      where: u.role == ^role
+                         and u.status == "active"
+                         and u.id != ^user.id
+                    ),
+                    :count
+                  )
               end
 
             %{
@@ -335,6 +352,7 @@ defmodule NotificationHub.ApiRouter do
               excerpt:  excerpt,
               mode:     mode,
               group_id: group_id,
+              role:     role,
               after_id: 0
             }
             |> NotificationHub.Workers.FanOutCustom.new()
